@@ -64,31 +64,54 @@ export class AudioRecorder {
   }
 
   private async convertSpeechToText(audioBlob: Blob): Promise<string> {
-    if (!this.recognition) {
-      throw new Error('Speech recognition not supported');
-    }
-
-    return new Promise((resolve, reject) => {
-      this.recognition!.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        resolve(transcript);
-      };
-
-      this.recognition!.onerror = (event) => {
-        reject(new Error(`Speech recognition error: ${event.error}`));
-      };
-
-      // Start recognition with the audio file
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      audio.onended = () => {
-        this.recognition!.stop();
-        URL.revokeObjectURL(audioUrl);
-      };
-
-      this.recognition!.start();
-      audio.play().catch(reject);
+    console.log('Converting speech to text from blob:', {
+      type: audioBlob.type,
+      size: audioBlob.size
     });
+    
+    try {
+      // Create form data
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      // Get API URL from environment
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const transcribeUrl = `${apiUrl}/api/transcribe`;
+      
+      console.log('Sending audio to transcription service:', transcribeUrl);
+
+      // Send to server for transcription
+      const response = await fetch(transcribeUrl, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `Transcription failed: ${response.statusText}${
+            errorData.error ? ` - ${errorData.error}` : ''
+          }`
+        );
+      }
+
+      const result = await response.json();
+      console.log('Transcription result:', result);
+
+      if (!result.text) {
+        throw new Error('No text was transcribed');
+      }
+
+      return result.text.trim();
+    } catch (error) {
+      console.error('Transcription error:', error);
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to transcribe audio'
+      );
+    }
   }
 
   isRecording(): boolean {

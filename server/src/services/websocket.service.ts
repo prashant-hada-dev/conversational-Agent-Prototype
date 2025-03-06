@@ -112,31 +112,25 @@ class WebSocketService {
         }
       );
 
-      // Convert response to speech and send final message
-      try {
-        // Convert to speech if TTS is enabled
-        const ttsResponse = await ttsService.convertToSpeech(aiResponse.content);
-        
-        // Send final response, with audio URL if TTS was successful
-        const finalResponse: ChatResponse = {
-          message: {
-            ...aiResponse,
-            id: lastMessageId || uuidv4(), // Use same ID if streaming, new if not
-            ...(ttsResponse && { audioUrl: ttsResponse.audioUrl }) // Only add audioUrl if TTS was successful
-          }
-        };
-        socket.emit(WS_EVENTS.CHAT_RESPONSE, finalResponse);
-      } catch (error) {
-        console.error('TTS Error:', error);
-        // Send final response without audio if TTS fails
-        const finalResponse: ChatResponse = {
-          message: {
-            ...aiResponse,
-            id: lastMessageId || uuidv4()
-          }
-        };
-        socket.emit(WS_EVENTS.CHAT_RESPONSE, finalResponse);
+      // Always convert response to speech - required for all responses
+      const ttsResponse = await ttsService.convertToSpeech(aiResponse.content);
+      
+      if (!ttsResponse || !ttsResponse.audioUrl) {
+        console.error('TTS failed to generate audio');
+        throw new Error('Failed to generate audio response');
       }
+
+      // Send final response with audio URL
+      const finalResponse: ChatResponse = {
+        message: {
+          ...aiResponse,
+          id: lastMessageId || uuidv4(),
+          audioUrl: ttsResponse.audioUrl
+        }
+      };
+      
+      console.log('Sending response with audio URL:', ttsResponse.audioUrl);
+      socket.emit(WS_EVENTS.CHAT_RESPONSE, finalResponse);
     } catch (error) {
       this.handleError(socket, error);
     } finally {

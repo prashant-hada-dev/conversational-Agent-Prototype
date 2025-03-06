@@ -25,6 +25,7 @@ export const ChatProvider = ({ children }: Props) => {
     isPlaying: false,
     currentTime: 0,
     duration: 0,
+    url: null,
   });
 
   const wsRef = useRef<WebSocketService | null>(null);
@@ -167,7 +168,7 @@ export const ChatProvider = ({ children }: Props) => {
   useEffect(() => {
     if (!wsRef.current) return;
 
-    wsRef.current.onMessage((response) => {
+    wsRef.current.onMessage(async (response) => {
       // Handle streaming messages
       if (response.message.id.startsWith('stream-')) {
         // Update or add streaming message
@@ -185,13 +186,50 @@ export const ChatProvider = ({ children }: Props) => {
         });
       } else {
         // Handle final message with audio
+        console.log('Received final message:', response);
+        
+        // Update messages
         setMessages(prev => {
           // Remove streaming message if exists
           const withoutStreaming = prev.filter(msg => !msg.id.startsWith('stream-'));
           return [...withoutStreaming, response.message];
         });
-        if (response.audioUrl) {
-          playAudio(response.audioUrl);
+
+        // Handle audio URL from either message or response
+        const audioUrl = response.audioUrl || response.message.audioUrl;
+        if (audioUrl) {
+          console.log('Received audio URL:', audioUrl);
+          // First update audio state
+          setAudioState(prev => ({
+            ...prev,
+            url: audioUrl,
+            isPlaying: false,
+            currentTime: 0,
+            duration: 0
+          }));
+
+          // Then try to play audio
+          try {
+            await playAudio(audioUrl);
+          } catch (error) {
+            console.error('Failed to play audio:', error);
+            // Keep the URL in state even if playback fails
+            setAudioState(prev => ({
+              ...prev,
+              url: audioUrl,
+              isPlaying: false
+            }));
+          }
+        } else {
+          console.warn('No audio URL in response');
+          // Reset audio state if no URL
+          setAudioState(prev => ({
+            ...prev,
+            url: null,
+            isPlaying: false,
+            currentTime: 0,
+            duration: 0
+          }));
         }
       }
     });

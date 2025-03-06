@@ -36,6 +36,7 @@ class OpenAIService {
 - Maintain a helpful and non-pushy approach
 
 Remember to:
+- keep the response crisp and under 300 cracter limit if possible
 - Be natural and conversational
 - Show empathy and understanding
 - Focus on value and solutions

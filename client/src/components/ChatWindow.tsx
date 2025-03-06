@@ -42,20 +42,32 @@ const ChatWindow: React.FC = () => {
     }
   };
 
+  const [transcribing, setTranscribing] = React.useState(false);
+  const [recordingError, setRecordingError] = React.useState<string | null>(null);
+
   const handleVoiceInput = async () => {
+    setRecordingError(null);
+    
     if (isRecording) {
       try {
+        setTranscribing(true);
+        console.log('Stopping voice recording and starting transcription...');
         await stopVoiceInput();
+        console.log('Voice input processed successfully');
       } catch (error) {
-        console.error('Error stopping voice input:', error);
-        // Show error notification
+        console.error('Error processing voice input:', error);
+        setRecordingError(error instanceof Error ? error.message : 'Failed to process voice input');
+      } finally {
+        setTranscribing(false);
       }
     } else {
       try {
+        console.log('Starting voice recording...');
         await startVoiceInput();
+        console.log('Voice recording started');
       } catch (error) {
         console.error('Error starting voice input:', error);
-        // Show error notification
+        setRecordingError(error instanceof Error ? error.message : 'Failed to start recording');
       }
     }
   };
@@ -64,6 +76,17 @@ const ChatWindow: React.FC = () => {
     // Cancel recording on Escape key
     if (e.key === 'Escape' && isRecording) {
       cancelVoiceInput();
+      return;
+    }
+
+    // Send message on Enter (without shift)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (isRecording) {
+        stopVoiceInput();
+      } else if (inputMessage.trim()) {
+        handleSendMessage(e);
+      }
     }
   };
 
@@ -101,10 +124,19 @@ const ChatWindow: React.FC = () => {
             <MessageList messages={messages} />
             {status.typing && (
               <div className="typing-indicator">
-                <span>AI is typing</span>
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-                <div className="typing-dot" />
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span>AI is typing</span>
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                  </div>
+                  {status.processing && (
+                    <span className="text-xs text-secondary-500">
+                      Generating voice response...
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -129,14 +161,27 @@ const ChatWindow: React.FC = () => {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isRecording ? 'Recording... Press Esc to cancel' : 'Type your message...'}
-                className={`text-input ${isRecording ? 'bg-red-50' : ''}`}
-                disabled={isRecording}
+                placeholder={
+                  isRecording
+                    ? 'Recording... Press Esc to cancel'
+                    : transcribing
+                      ? 'Transcribing voice...'
+                      : 'Type your message or use voice input...'
+                }
+                className={`text-input ${isRecording ? 'bg-red-50' : transcribing ? 'bg-yellow-50' : ''}`}
+                disabled={isRecording || transcribing}
               />
-              {isRecording && (
+              {(isRecording || transcribing) && (
                 <div className="recording-indicator">
-                  <div className="recording-pulse" />
-                  <span className="recording-time">Recording...</span>
+                  <div className={`recording-pulse ${transcribing ? 'pulse-yellow' : ''}`} />
+                  <span className="recording-time">
+                    {transcribing ? 'Transcribing...' : 'Recording...'}
+                  </span>
+                </div>
+              )}
+              {recordingError && (
+                <div className="text-red-500 text-xs mt-1 absolute -bottom-6 left-0 right-0 text-center">
+                  {recordingError}
                 </div>
               )}
               <button

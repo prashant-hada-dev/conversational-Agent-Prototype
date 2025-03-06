@@ -14,13 +14,26 @@ const AudioControls: React.FC = () => {
 
   const handlePlayPause = () => {
     if (url) {
+      console.log('[AudioControls] Audio URL:', url);
       if (isPlaying) {
+        console.log('[AudioControls] Pausing audio');
         pauseAudio();
       } else {
+        console.log('[AudioControls] Playing audio');
         playAudio(url);
       }
     }
   };
+
+  // Log when audio state changes
+  React.useEffect(() => {
+    console.log('[AudioControls] Audio state changed:', {
+      isPlaying,
+      currentTime,
+      duration,
+      url
+    });
+  }, [isPlaying, currentTime, duration, url]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -49,6 +62,21 @@ const AudioControls: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Manual audio element for testing */}
+      {url && (
+        <div className="mt-2 px-2">
+          <p className="text-xs text-secondary-500 mb-1">Manual audio player for testing:</p>
+          <audio
+            src={url}
+            controls
+            className="w-full h-8"
+            onPlay={() => console.log('[AudioControls] Manual audio play')}
+            onPause={() => console.log('[AudioControls] Manual audio pause')}
+            onError={(e) => console.error('[AudioControls] Manual audio error:', e)}
+          />
+        </div>
+      )}
     </div>
   );
 };

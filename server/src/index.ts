@@ -18,10 +18,16 @@ app.use(cors({
 // Middleware
 app.use(express.json());
 
+// Import routes
+import transcriptionRoutes from './routes/transcription';
+
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// API routes
+app.use('/api', transcriptionRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

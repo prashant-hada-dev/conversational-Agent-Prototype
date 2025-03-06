@@ -22,7 +22,7 @@ export interface AudioState {
   isPlaying: boolean;
   currentTime: number;
   duration: number;
-  url?: string;
+  url: string | null;
 }
 
 export interface ChatContextType {
