@@ -106,3 +106,32 @@
 - Look into WebSocket reconnection strategies
 - Consider implementing message queue for better reliability
 - Need to improve error logging and monitoring
+
+## Recent Backend Updates (March 6, 2025)
+
+### TTS Service Improvements
+1. Text Processing
+   - Implemented smart text chunking (150 chars per chunk)
+   - Added sentence and comma-based splitting
+   - Improved punctuation handling
+   - Added proper spacing between chunks
+
+2. Audio Generation
+   - Optimized for standard lightning model
+   - Added sequential chunk processing
+   - Implemented proper audio file concatenation
+   - Added delay between chunks to prevent rate limiting
+
+3. Error Handling
+   - Added detailed error message parsing
+   - Improved retry mechanism with exponential backoff
+   - Better error logging and debugging
+   - Added proper error propagation to frontend
+
+4. File Management
+   - Implemented local audio file storage
+   - Added proper file naming with timestamps
+   - Improved WAV header handling
+   - Added file size logging
+
+These improvements have resolved the previous TTS timeout issues and provide better reliability for audio generation across various response lengths.
