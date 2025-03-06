@@ -1,10 +1,10 @@
 import React from 'react';
-import { FiPlay, FiPause, FiVolume2 } from 'react-icons/fi';
+import { FiPlay, FiPause, FiVolume2, FiLoader } from 'react-icons/fi';
 import { useChatContext } from '../contexts/ChatContext';
 
 const AudioControls: React.FC = () => {
   const { audioState, playAudio, pauseAudio } = useChatContext();
-  const { isPlaying, currentTime, duration, url } = audioState;
+  const { isPlaying, currentTime, duration, url, isStreaming, streamProgress, queueSize } = audioState;
 
   const formatTime = (time: number): string => {
     const minutes = Math.floor(time / 60);
@@ -14,26 +14,13 @@ const AudioControls: React.FC = () => {
 
   const handlePlayPause = () => {
     if (url) {
-      console.log('[AudioControls] Audio URL:', url);
       if (isPlaying) {
-        console.log('[AudioControls] Pausing audio');
         pauseAudio();
       } else {
-        console.log('[AudioControls] Playing audio');
         playAudio(url);
       }
     }
   };
-
-  // Log when audio state changes
-  React.useEffect(() => {
-    console.log('[AudioControls] Audio state changed:', {
-      isPlaying,
-      currentTime,
-      duration,
-      url
-    });
-  }, [isPlaying, currentTime, duration, url]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -42,41 +29,45 @@ const AudioControls: React.FC = () => {
       <div className="flex items-center gap-2">
         <button
           onClick={handlePlayPause}
-          className="audio-button"
-          disabled={!url}
+          className={`audio-button ${isStreaming ? 'opacity-50' : ''}`}
+          disabled={!url || isStreaming}
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? <FiPause /> : <FiPlay />}
         </button>
         
         <div className="flex items-center gap-2 flex-1">
-          <FiVolume2 className="text-secondary-400" />
-          <div className="audio-progress">
+          {isStreaming ? (
+            <FiLoader className="animate-spin text-primary-500" />
+          ) : (
+            <FiVolume2 className="text-secondary-400" />
+          )}
+          
+          <div className="audio-progress relative">
             <div
               className="audio-progress-bar"
               style={{ width: `${progress}%` }}
             />
+            {isStreaming && (
+              <div 
+                className="absolute top-0 left-0 h-full bg-primary-200 opacity-30"
+                style={{ width: `${(streamProgress ?? 0) * 10}%` }}
+              />
+            )}
           </div>
-          <span className="text-xs text-secondary-500">
-            {formatTime(currentTime)} / {formatTime(duration)}
-          </span>
+
+          <div className="flex flex-col items-end">
+            <span className="text-xs text-secondary-500">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+            {isStreaming && (queueSize ?? 0) > 0 && (
+              <span className="text-xs text-primary-500">
+                Streaming... ({queueSize ?? 0} chunks remaining)
+              </span>
+            )}
+          </div>
         </div>
       </div>
-
-      {/* Manual audio element for testing */}
-      {url && (
-        <div className="mt-2 px-2">
-          <p className="text-xs text-secondary-500 mb-1">Manual audio player for testing:</p>
-          <audio
-            src={url}
-            controls
-            className="w-full h-8"
-            onPlay={() => console.log('[AudioControls] Manual audio play')}
-            onPause={() => console.log('[AudioControls] Manual audio pause')}
-            onError={(e) => console.error('[AudioControls] Manual audio error:', e)}
-          />
-        </div>
-      )}
     </div>
   );
 };

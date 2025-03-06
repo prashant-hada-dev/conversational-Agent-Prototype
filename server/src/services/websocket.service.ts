@@ -3,9 +3,10 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 import config from '../config/config';
 import { ChatMessage, ChatResponse, WebSocketEvents, WS_EVENTS, ErrorResponse } from '../types/chat';
+import { STREAMING_EVENTS, StreamingError } from '../types/streaming';
 import { aiService } from './ai.service';
 import { redisService } from './redis.service';
-import { ttsService } from './tts.service';
+import { streamingTTSService } from './streaming-tts.service';
 
 class WebSocketService {
   private io: SocketIOServer;
@@ -23,6 +24,8 @@ class WebSocketService {
       }
     });
 
+    // Initialize streaming TTS service with socket server
+    streamingTTSService.setSocketServer(this.io);
     this.setupEventHandlers();
   }
 
@@ -47,11 +50,21 @@ class WebSocketService {
       // Handle audio input
       socket.on(WS_EVENTS.CHAT_AUDIO, async (data: { text: string }) => {
         try {
-          // Process the transcribed text from client
           await this.handleChatMessage(socket, data.text);
         } catch (error) {
           this.handleError(socket, error);
         }
+      });
+
+      // Handle speech events
+      socket.on(STREAMING_EVENTS.SPEECH_START, () => {
+        console.log(`Speech started: ${socket.id}`);
+        socket.broadcast.emit(STREAMING_EVENTS.SPEECH_START);
+      });
+
+      socket.on(STREAMING_EVENTS.SPEECH_END, () => {
+        console.log(`Speech ended: ${socket.id}`);
+        socket.broadcast.emit(STREAMING_EVENTS.SPEECH_END);
       });
 
       // Handle typing indicator
@@ -89,7 +102,7 @@ class WebSocketService {
       };
       await redisService.addMessageToSession(sessionId, userMessage);
 
-      // Generate streaming response
+      // Generate AI response
       let lastContent = '';
       let lastMessageId = '';
       const aiResponse = await aiService.generateStreamingResponse(
@@ -97,7 +110,6 @@ class WebSocketService {
         message,
         (token: string) => {
           lastContent += token;
-          // Only emit intermediate updates, not the final message
           if (!lastMessageId) {
             lastMessageId = 'stream-' + Date.now();
           }
@@ -112,25 +124,16 @@ class WebSocketService {
         }
       );
 
-      // Always convert response to speech - required for all responses
-      const ttsResponse = await ttsService.convertToSpeech(aiResponse.content);
-      
-      if (!ttsResponse || !ttsResponse.audioUrl) {
-        console.error('TTS failed to generate audio');
-        throw new Error('Failed to generate audio response');
-      }
+      // Stream TTS response
+      await streamingTTSService.streamResponse(socket, aiResponse.content);
 
-      // Send final response with audio URL
-      const finalResponse: ChatResponse = {
-        message: {
-          ...aiResponse,
-          id: lastMessageId || uuidv4(),
-          audioUrl: ttsResponse.audioUrl
-        }
+      // Save final message to Redis
+      const finalMessage: ChatMessage = {
+        ...aiResponse,
+        id: lastMessageId || uuidv4()
       };
-      
-      console.log('Sending response with audio URL:', ttsResponse.audioUrl);
-      socket.emit(WS_EVENTS.CHAT_RESPONSE, finalResponse);
+      await redisService.addMessageToSession(sessionId, finalMessage);
+
     } catch (error) {
       this.handleError(socket, error);
     } finally {
@@ -144,7 +147,7 @@ class WebSocketService {
   private handleError(socket: Socket, error: unknown): void {
     console.error('WebSocket Error:', error);
     
-    const errorResponse: ErrorResponse = {
+    const errorResponse: ErrorResponse | StreamingError = {
       error: 'An error occurred',
       code: 'UNKNOWN_ERROR'
     };

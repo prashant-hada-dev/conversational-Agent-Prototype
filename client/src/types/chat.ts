@@ -10,6 +10,7 @@ export interface ChatStatus {
   connected: boolean;
   typing?: boolean;
   processing?: boolean;
+  streaming?: boolean;
 }
 
 export interface ChatResponse {
@@ -23,6 +24,9 @@ export interface AudioState {
   currentTime: number;
   duration: number;
   url: string | null;
+  isStreaming?: boolean;
+  streamProgress?: number;
+  queueSize?: number;
 }
 
 export interface ChatContextType {

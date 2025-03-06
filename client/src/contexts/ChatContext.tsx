@@ -1,8 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import WebSocketService from '../services/websocket.service';
 import { AudioRecorder } from '../services/audio.service';
+import { audioQueueManager } from '../services/audio-queue.service';
 import config from '../config/config';
 import { ChatContextType, ChatMessage, ChatStatus, AudioState } from '../types/chat';
+import { AudioChunk, STREAMING_EVENTS } from '../types/streaming';
+import { urlToBlob } from '../utils/audio';
 
 interface Props {
   children: React.ReactNode;
@@ -26,10 +29,13 @@ export const ChatProvider = ({ children }: Props) => {
     currentTime: 0,
     duration: 0,
     url: null,
+    isStreaming: false,
+    streamProgress: 0,
+    queueSize: 0
   });
 
   const wsRef = useRef<WebSocketService | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { audioRecorder } = useRef({ audioRecorder: new AudioRecorder() }).current;
 
   // Initialize WebSocket service
   useEffect(() => {
@@ -43,32 +49,16 @@ export const ChatProvider = ({ children }: Props) => {
 
   // Handle audio playback
   const playAudio = useCallback(async (url: string) => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-    }
-
     try {
-      audioRef.current.src = url;
-      await audioRef.current.play();
+      const audioBlob = await urlToBlob(url);
+      await audioQueueManager.enqueueChunk({
+        id: 'single-' + Date.now(),
+        text: '',
+        audio: audioBlob,
+        isLast: true,
+        timestamp: Date.now()
+      });
       setAudioState(prev => ({ ...prev, isPlaying: true, url }));
-
-      audioRef.current.onended = () => {
-        setAudioState(prev => ({ ...prev, isPlaying: false }));
-      };
-
-      audioRef.current.ontimeupdate = () => {
-        setAudioState(prev => ({
-          ...prev,
-          currentTime: audioRef.current?.currentTime || 0,
-        }));
-      };
-
-      audioRef.current.onloadedmetadata = () => {
-        setAudioState(prev => ({
-          ...prev,
-          duration: audioRef.current?.duration || 0,
-        }));
-      };
     } catch (error) {
       console.error('Error playing audio:', error);
       setAudioState(prev => ({ ...prev, isPlaying: false }));
@@ -76,10 +66,8 @@ export const ChatProvider = ({ children }: Props) => {
   }, []);
 
   const pauseAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      setAudioState(prev => ({ ...prev, isPlaying: false }));
-    }
+    audioQueueManager.pause();
+    setAudioState(prev => ({ ...prev, isPlaying: false }));
   }, []);
 
   // Send message
@@ -101,36 +89,32 @@ export const ChatProvider = ({ children }: Props) => {
 
   // Voice input handling
   const [isRecording, setIsRecording] = useState(false);
-  const { audioRecorder } = useRef({ audioRecorder: new AudioRecorder() }).current;
 
   const startVoiceInput = useCallback(async () => {
     try {
       await audioRecorder.startRecording();
       setIsRecording(true);
+      wsRef.current?.sendSpeechStart();
     } catch (error) {
       console.error('Error starting voice input:', error);
-      // Add error notification here
       throw error;
     }
   }, []);
 
   const stopVoiceInput = useCallback(async () => {
     try {
-      if (!audioRecorder.isRecording()) {
-        return;
-      }
+      if (!audioRecorder.isRecording()) return;
 
       const { text } = await audioRecorder.stopRecording();
       setIsRecording(false);
+      wsRef.current?.sendSpeechEnd();
 
       if (!text) {
         console.warn('No text transcribed from voice input');
         return;
       }
 
-      // Send transcribed text to server
       if (wsRef.current?.isConnected()) {
-        // First add the user's voice message to the chat
         const userMessage: ChatMessage = {
           id: Date.now().toString(),
           role: 'user',
@@ -138,14 +122,11 @@ export const ChatProvider = ({ children }: Props) => {
           timestamp: Date.now(),
         };
         setMessages(prev => [...prev, userMessage]);
-
-        // Send the text to the server as a regular message
         wsRef.current.sendMessage(text);
       }
     } catch (error) {
       console.error('Error stopping voice input:', error);
       setIsRecording(false);
-      // Add error notification here
     }
   }, []);
 
@@ -153,9 +134,9 @@ export const ChatProvider = ({ children }: Props) => {
     try {
       audioRecorder.cancelRecording();
       setIsRecording(false);
+      wsRef.current?.sendSpeechEnd();
     } catch (error) {
       console.error('Error canceling voice input:', error);
-      // Add error notification here
     }
   }, []);
 
@@ -168,69 +149,74 @@ export const ChatProvider = ({ children }: Props) => {
   useEffect(() => {
     if (!wsRef.current) return;
 
-    wsRef.current.onMessage(async (response) => {
-      // Handle streaming messages
-      if (response.message.id.startsWith('stream-')) {
-        // Update or add streaming message
+    // Set up audio queue state updates
+    audioQueueManager.onQueueStateChange((state) => {
+      setAudioState(prev => ({
+        ...prev,
+        isPlaying: state.isPlaying,
+        isStreaming: state.remainingChunks > 0,
+        queueSize: state.remainingChunks
+      }));
+    });
+
+    // Handle streaming events
+    wsRef.current.onStreamStart(() => {
+      setStatus(prev => ({ ...prev, streaming: true }));
+      setAudioState(prev => ({ ...prev, isStreaming: true, streamProgress: 0 }));
+    });
+
+    wsRef.current.onStreamEnd(() => {
+      setStatus(prev => ({ ...prev, streaming: false }));
+      setAudioState(prev => ({ ...prev, isStreaming: false }));
+    });
+
+    wsRef.current.onStreamChunk(async (chunk: AudioChunk) => {
+      try {
+        // Convert audio URL to Blob
+        const audioBlob = await urlToBlob(chunk.audio as string);
+        const processedChunk = {
+          ...chunk,
+          audio: audioBlob
+        };
+        
+        await audioQueueManager.enqueueChunk(processedChunk);
+        
+        // Update messages with chunk text
         setMessages(prev => {
-          const streamIndex = prev.findIndex(msg => msg.id === response.message.id);
-          if (streamIndex >= 0) {
-            // Update existing streaming message
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage?.role === 'assistant') {
             const newMessages = [...prev];
-            newMessages[streamIndex] = response.message;
+            newMessages[newMessages.length - 1] = {
+              ...lastMessage,
+              content: lastMessage.content + chunk.text
+            };
             return newMessages;
           } else {
-            // Add new streaming message
-            return [...prev, response.message];
+            return [...prev, {
+              id: chunk.id,
+              role: 'assistant',
+              content: chunk.text,
+              timestamp: chunk.timestamp
+            }];
           }
         });
-      } else {
-        // Handle final message with audio
-        console.log('Received final message:', response);
-        
-        // Update messages
+
+        // Update streaming progress
+        setAudioState(prev => ({
+          ...prev,
+          streamProgress: (prev.streamProgress || 0) + 1
+        }));
+      } catch (error) {
+        console.error('Error handling audio chunk:', error);
+      }
+    });
+
+    wsRef.current.onMessage(async (response) => {
+      if (!response.message.id.startsWith('stream-')) {
         setMessages(prev => {
-          // Remove streaming message if exists
           const withoutStreaming = prev.filter(msg => !msg.id.startsWith('stream-'));
           return [...withoutStreaming, response.message];
         });
-
-        // Handle audio URL from either message or response
-        const audioUrl = response.audioUrl || response.message.audioUrl;
-        if (audioUrl) {
-          console.log('Received audio URL:', audioUrl);
-          // First update audio state
-          setAudioState(prev => ({
-            ...prev,
-            url: audioUrl,
-            isPlaying: false,
-            currentTime: 0,
-            duration: 0
-          }));
-
-          // Then try to play audio
-          try {
-            await playAudio(audioUrl);
-          } catch (error) {
-            console.error('Failed to play audio:', error);
-            // Keep the URL in state even if playback fails
-            setAudioState(prev => ({
-              ...prev,
-              url: audioUrl,
-              isPlaying: false
-            }));
-          }
-        } else {
-          console.warn('No audio URL in response');
-          // Reset audio state if no URL
-          setAudioState(prev => ({
-            ...prev,
-            url: null,
-            isPlaying: false,
-            currentTime: 0,
-            duration: 0
-          }));
-        }
       }
     });
 
@@ -240,13 +226,21 @@ export const ChatProvider = ({ children }: Props) => {
 
     wsRef.current.onError((error) => {
       console.error('WebSocket error:', error);
-      // Implement error handling UI here
+      audioQueueManager.clear();
+      setAudioState(prev => ({
+        ...prev,
+        isPlaying: false,
+        isStreaming: false,
+        streamProgress: 0,
+        queueSize: 0
+      }));
     });
 
     wsRef.current.onDisconnect(() => {
-      setStatus(prev => ({ ...prev, connected: false }));
+      setStatus(prev => ({ ...prev, connected: false, streaming: false }));
+      audioQueueManager.clear();
     });
-  }, [playAudio]);
+  }, []);
 
   const value: ChatContextType = {
     messages,

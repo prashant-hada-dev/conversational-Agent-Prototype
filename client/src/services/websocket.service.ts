@@ -1,5 +1,7 @@
 import socketIOClient from 'socket.io-client';
 import { ChatConfig, ChatResponse, ChatStatus, WebSocketEvents, WS_EVENTS } from '../types/chat';
+import { AudioChunk, STREAMING_EVENTS, StreamingError } from '../types/streaming';
+import { audioQueueManager } from './audio-queue.service';
 
 class WebSocketService {
   private socket: ReturnType<typeof socketIOClient> | null = null;
@@ -79,11 +81,60 @@ class WebSocketService {
     this.socket.on(WS_EVENTS.CHAT_STATUS, (status: ChatStatus) => {
       this.statusCallback?.(status);
     });
+
+    // Set up streaming event handlers
+    this.socket.on(STREAMING_EVENTS.CHUNK_RECEIVED, (chunk: AudioChunk) => {
+      console.log(`Received audio chunk ${chunk.id}`);
+      this.streamChunkCallback?.(chunk);
+      audioQueueManager.enqueueChunk(chunk).catch(error => {
+        console.error('Failed to enqueue audio chunk:', error);
+        this.handleStreamingError({
+          code: 'QUEUE_FULL',
+          message: 'Failed to enqueue audio chunk',
+          details: error
+        });
+      });
+    });
+
+    this.socket.on(STREAMING_EVENTS.STREAM_START, () => {
+      console.log('Stream started');
+      this.streamStartCallback?.();
+    });
+
+    this.socket.on(STREAMING_EVENTS.STREAM_END, () => {
+      console.log('Stream ended');
+      this.streamEndCallback?.();
+    });
+
+    this.socket.on(STREAMING_EVENTS.STREAM_ERROR, (error: StreamingError) => {
+      console.error('Streaming error:', error);
+      this.streamErrorCallback?.(error);
+    });
+
+    this.socket.on(STREAMING_EVENTS.SPEECH_START, () => {
+      console.log('Speech input started');
+      this.speechStartCallback?.();
+    });
+
+    this.socket.on(STREAMING_EVENTS.SPEECH_END, () => {
+      console.log('Speech input ended');
+      this.speechEndCallback?.();
+    });
+  }
+
+  private handleStreamingError(error: StreamingError): void {
+    this.streamErrorCallback?.(error);
   }
 
   private messageCallback?: (response: ChatResponse) => void;
   private errorCallback?: (error: string) => void;
   private statusCallback?: (status: ChatStatus) => void;
+  private streamChunkCallback?: (chunk: AudioChunk) => void;
+  private streamStartCallback?: () => void;
+  private streamEndCallback?: () => void;
+  private streamErrorCallback?: (error: StreamingError) => void;
+  private speechStartCallback?: () => void;
+  private speechEndCallback?: () => void;
 
   private handleReconnect(reject: (reason?: any) => void): void {
     this.reconnectAttempts++;
@@ -181,6 +232,66 @@ class WebSocketService {
       console.log('Removing listener for event:', event);
       this.socket.off(event);
     }
+  }
+
+  // Streaming event handlers
+  onStreamChunk(callback: (chunk: AudioChunk) => void): void {
+    this.streamChunkCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  onStreamStart(callback: () => void): void {
+    this.streamStartCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  onStreamEnd(callback: () => void): void {
+    this.streamEndCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  onStreamError(callback: (error: StreamingError) => void): void {
+    this.streamErrorCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  onSpeechStart(callback: () => void): void {
+    this.speechStartCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  onSpeechEnd(callback: () => void): void {
+    this.speechEndCallback = callback;
+    if (this.socket?.connected) {
+      this.setupEventListeners();
+    }
+  }
+
+  // Speech input methods
+  sendSpeechStart(): void {
+    if (!this.socket?.connected) {
+      throw new Error('WebSocket not connected');
+    }
+    console.log('Sending speech start event');
+    this.socket.emit(STREAMING_EVENTS.SPEECH_START);
+  }
+
+  sendSpeechEnd(): void {
+    if (!this.socket?.connected) {
+      throw new Error('WebSocket not connected');
+    }
+    console.log('Sending speech end event');
+    this.socket.emit(STREAMING_EVENTS.SPEECH_END);
   }
 }
 
