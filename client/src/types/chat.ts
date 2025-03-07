@@ -11,6 +11,10 @@ export interface ChatStatus {
   typing?: boolean;
   processing?: boolean;
   streaming?: boolean;
+  voiceChannel?: {
+    active: boolean;
+    status: 'connecting' | 'listening' | 'processing' | 'speaking' | 'idle';
+  };
 }
 
 export interface ChatResponse {
@@ -35,10 +39,14 @@ export interface ChatContextType {
   audioState: AudioState;
   isRecording: boolean;
   isMinimized: boolean;
+  isVoiceChannelActive: boolean;
+  voiceChannelStatus: string;
   sendMessage: (message: string) => Promise<void>;
   startVoiceInput: () => Promise<void>;
   stopVoiceInput: () => Promise<void>;
   cancelVoiceInput: () => void;
+  startVoiceChannel: () => Promise<void>;
+  stopVoiceChannel: () => Promise<void>;
   playAudio: (url: string) => Promise<void>;
   pauseAudio: () => void;
   minimizeChat: () => void;

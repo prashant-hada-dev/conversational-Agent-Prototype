@@ -3,6 +3,7 @@ import { FiMinimize2, FiMaximize2, FiMic, FiMicOff, FiSend } from 'react-icons/f
 import { useChatContext } from '../contexts/ChatContext';
 import MessageList from './MessageList';
 import AudioControls from './AudioControls';
+import VoiceChannel from './VoiceChannel';
 
 const ChatWindow: React.FC = () => {
   const {
@@ -103,17 +104,22 @@ const ChatWindow: React.FC = () => {
     <div className={`chat-container ${isMinimized ? 'h-16' : ''}`}>
       {/* Chat Header */}
       <div className="chat-header">
-        <div className="flex items-center">
-          <div className={`status-indicator ${status.connected ? 'status-online' : 'status-offline'}`} />
-          <span className="ml-2 font-semibold">AI Sales Assistant</span>
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center">
+            <div className={`status-indicator ${status.connected ? 'status-online' : 'status-offline'}`} />
+            <span className="ml-2 font-semibold">AI Sales Assistant</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <VoiceChannel />
+            <button
+              onClick={toggleMinimize}
+              className="minimize-button"
+              aria-label={isMinimized ? 'Maximize chat' : 'Minimize chat'}
+            >
+              {isMinimized ? <FiMaximize2 /> : <FiMinimize2 />}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={toggleMinimize}
-          className="minimize-button"
-          aria-label={isMinimized ? 'Maximize chat' : 'Minimize chat'}
-        >
-          {isMinimized ? <FiMaximize2 /> : <FiMinimize2 />}
-        </button>
       </div>
 
       {/* Chat Content */}
