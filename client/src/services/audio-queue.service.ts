@@ -34,6 +34,13 @@ class AudioQueueManager {
         throw new Error('Audio queue is full');
       }
 
+      // Check for duplicate chunks
+      const isDuplicate = this.queue.some(queuedChunk => queuedChunk.id === chunk.id);
+      if (isDuplicate) {
+        console.log(`Skipping duplicate chunk: ${chunk.id}`);
+        return;
+      }
+
       // Process the chunk if audio is a string URL
       let processedChunk: ProcessedAudioChunk;
       if (typeof chunk.audio === 'string') {
@@ -46,8 +53,15 @@ class AudioQueueManager {
         processedChunk = chunk as ProcessedAudioChunk;
       }
 
+      // Log chunk details before enqueueing
+      console.log('Enqueueing chunk:', {
+        id: chunk.id,
+        isLast: chunk.isLast,
+        queueSize: this.queue.length,
+        isPlaying: this.isPlaying
+      });
+
       this.queue.push(processedChunk);
-      console.log(`Enqueued chunk ${chunk.id}, queue size: ${this.queue.length}`);
 
       // If not playing, start playback
       if (!this.isPlaying) {
@@ -80,20 +94,44 @@ class AudioQueueManager {
 
     try {
       const chunk = this.queue[0];
+      
+      // Log before playing
+      console.log('Starting playback of chunk:', {
+        id: chunk.id,
+        isLast: chunk.isLast,
+        queueSize: this.queue.length
+      });
+
       const audioBuffer = await this.createAudioBuffer(chunk);
       
+      // Ensure we're not already playing something
+      if (this.currentSource) {
+        console.log('Stopping current source before playing new chunk');
+        this.currentSource.stop();
+        this.currentSource = null;
+      }
+
       this.currentSource = this.audioContext.createBufferSource();
       this.currentSource.buffer = audioBuffer;
       this.currentSource.connect(this.audioContext.destination);
 
       // Handle chunk completion
       this.currentSource.onended = () => {
-        this.queue.shift(); // Remove played chunk
+        console.log(`Chunk ${chunk.id} playback ended`);
+        
+        // Only remove the chunk if it's still at the front of the queue
+        if (this.queue[0]?.id === chunk.id) {
+          this.queue.shift(); // Remove played chunk
+          console.log(`Removed chunk ${chunk.id}, queue size: ${this.queue.length}`);
+        }
+        
         this.currentSource = null;
         
         if (this.queue.length > 0) {
+          console.log('Playing next chunk in queue');
           this.playNextChunk(); // Play next chunk
         } else {
+          console.log('No more chunks in queue');
           this.isPlaying = false;
         }
         this.updateState();

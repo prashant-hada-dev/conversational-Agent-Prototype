@@ -5,6 +5,7 @@ import config from './config/config';
 import { ERROR_CODES, ErrorResponse } from './types/chat';
 import WebSocketService from './services/websocket.service';
 import { checkRedisConnection } from './utils/redis-check';
+import { cleanupService } from './services/cleanup.service';
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +21,7 @@ app.use(express.json());
 
 // Import routes
 import transcriptionRoutes from './routes/transcription';
+import audioRoutes from './routes/audio';
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
@@ -28,6 +30,7 @@ app.get('/health', (req: Request, res: Response) => {
 
 // API routes
 app.use('/api', transcriptionRoutes);
+app.use('/api/audio', audioRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -54,6 +57,9 @@ const startServer = async () => {
     // Initialize WebSocket service
     const wsService = new WebSocketService(server);
 
+    // Start cleanup service
+    cleanupService.start();
+
     // Start HTTP server
     const port = config.port;
     server.listen(port, () => {
@@ -61,6 +67,7 @@ const startServer = async () => {
       console.log(`✅ HTTP server running on port ${port}`);
       console.log(`✅ WebSocket server running on path ${config.wsConfig.path}`);
       console.log(`✅ Redis connected at ${config.redis.host}:${config.redis.port}`);
+      console.log(`✅ Audio cleanup service running`);
       console.log('============================\n');
     });
   } catch (error) {
@@ -81,6 +88,14 @@ const gracefulShutdown = async () => {
         resolve();
       });
     });
+
+    // Stop cleanup service
+    cleanupService.stop();
+    console.log('✅ Audio cleanup service stopped');
+
+    // Force cleanup of remaining files
+    await cleanupService.forceCleanup();
+    console.log('✅ Audio files cleaned up');
 
     // Close Redis connection
     await checkRedisConnection().then(() => {

@@ -53,6 +53,7 @@ export interface TTSRequest {
 
 export interface TTSResponse {
   audioUrl: string;
+  audioPath?: string;  // Path to the audio file on disk
   duration: number;
   format: AudioFormat;
 }
@@ -72,6 +73,7 @@ export const REDIS_KEYS = {
   SESSION_PREFIX: 'chat:session:',
   CONTEXT_PREFIX: 'chat:context:',
   USER_PREFIX: 'user:',
+  AUDIO_PREFIX: 'audio:file:',
 } as const;
 
 // WebSocket Event Types

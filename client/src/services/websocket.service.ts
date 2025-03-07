@@ -85,15 +85,8 @@ class WebSocketService {
     // Set up streaming event handlers
     this.socket.on(STREAMING_EVENTS.CHUNK_RECEIVED, (chunk: AudioChunk) => {
       console.log(`Received audio chunk ${chunk.id}`);
+      // Only notify through callback, let ChatContext handle enqueueing
       this.streamChunkCallback?.(chunk);
-      audioQueueManager.enqueueChunk(chunk).catch(error => {
-        console.error('Failed to enqueue audio chunk:', error);
-        this.handleStreamingError({
-          code: 'QUEUE_FULL',
-          message: 'Failed to enqueue audio chunk',
-          details: error
-        });
-      });
     });
 
     this.socket.on(STREAMING_EVENTS.STREAM_START, () => {

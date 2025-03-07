@@ -23,7 +23,13 @@ export const useChatContext = () => {
 
 export const ChatProvider = ({ children }: Props) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [status, setStatus] = useState<ChatStatus>({ connected: false });
+  const [status, setStatus] = useState<ChatStatus>({
+    connected: false,
+    voiceChannel: {
+      active: false,
+      status: 'idle'
+    }
+  });
   const [audioState, setAudioState] = useState<AudioState>({
     isPlaying: false,
     currentTime: 0,
@@ -33,6 +39,8 @@ export const ChatProvider = ({ children }: Props) => {
     streamProgress: 0,
     queueSize: 0
   });
+  const [isVoiceChannelActive, setIsVoiceChannelActive] = useState(false);
+  const [voiceChannelStatus, setVoiceChannelStatus] = useState('Ready');
 
   const wsRef = useRef<WebSocketService | null>(null);
   const { audioRecorder } = useRef({ audioRecorder: new AudioRecorder() }).current;
@@ -172,19 +180,49 @@ export const ChatProvider = ({ children }: Props) => {
 
     wsRef.current.onStreamChunk(async (chunk: AudioChunk) => {
       try {
+        // Log chunk details for debugging
+        console.log('Received stream chunk:', {
+          id: chunk.id,
+          textLength: chunk.text.length,
+          isLast: chunk.isLast
+        });
+
+        // Only process chunks that haven't been processed before
+        const isDuplicate = messages.some(msg => msg.id === chunk.id);
+        if (isDuplicate) {
+          console.log(`Skipping duplicate chunk: ${chunk.id}`);
+          return;
+        }
+
         // Convert audio URL to Blob
         const audioBlob = await urlToBlob(chunk.audio as string);
         const processedChunk = {
           ...chunk,
           audio: audioBlob
         };
+
+        // Log before enqueueing
+        console.log('Enqueueing audio chunk:', {
+          id: chunk.id,
+          isLast: chunk.isLast,
+          queueSize: audioState.queueSize
+        });
         
         await audioQueueManager.enqueueChunk(processedChunk);
         
         // Update messages with chunk text
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
-          if (lastMessage?.role === 'assistant') {
+          if (lastMessage?.role === 'assistant' && !lastMessage.id.startsWith('stream-')) {
+            // If last message is not a streaming message, create new one
+            return [...prev, {
+              id: chunk.id,
+              role: 'assistant',
+              content: chunk.text,
+              timestamp: chunk.timestamp
+            }];
+          } else if (lastMessage?.role === 'assistant') {
+            // Update existing streaming message
             const newMessages = [...prev];
             newMessages[newMessages.length - 1] = {
               ...lastMessage,
@@ -192,6 +230,7 @@ export const ChatProvider = ({ children }: Props) => {
             };
             return newMessages;
           } else {
+            // First chunk of a new streaming message
             return [...prev, {
               id: chunk.id,
               role: 'assistant',
@@ -212,12 +251,20 @@ export const ChatProvider = ({ children }: Props) => {
     });
 
     wsRef.current.onMessage(async (response) => {
-      if (!response.message.id.startsWith('stream-')) {
-        setMessages(prev => {
-          const withoutStreaming = prev.filter(msg => !msg.id.startsWith('stream-'));
-          return [...withoutStreaming, response.message];
-        });
+      // Skip message handling for streaming responses
+      if (response.message.id.startsWith('stream-')) {
+        return;
       }
+      
+      // Only handle non-streaming messages
+      setMessages(prev => {
+        const lastMessage = prev[prev.length - 1];
+        // If the last message has the same content, don't add it again
+        if (lastMessage && lastMessage.content === response.message.content) {
+          return prev;
+        }
+        return [...prev, response.message];
+      });
     });
 
     wsRef.current.onStatus((newStatus) => {
@@ -242,16 +289,91 @@ export const ChatProvider = ({ children }: Props) => {
     });
   }, []);
 
+  // Voice channel methods
+  const startVoiceChannel = useCallback(async () => {
+    try {
+      setIsVoiceChannelActive(true);
+      setVoiceChannelStatus('Connecting...');
+      setStatus(prev => ({
+        ...prev,
+        voiceChannel: { active: true, status: 'connecting' }
+      }));
+
+      // Start continuous voice input first
+      await startVoiceInput();
+      setVoiceChannelStatus('Listening...');
+      setStatus(prev => ({
+        ...prev,
+        voiceChannel: { active: true, status: 'listening' }
+      }));
+
+      // Set up automatic restart of voice input after processing
+      audioRecorder.setOnSpeechEnd(() => {
+        if (isVoiceChannelActive) {
+          setTimeout(() => {
+            startVoiceInput().catch(console.error);
+          }, 1000); // Wait 1s before restarting
+        }
+      });
+
+    } catch (error) {
+      console.error('Error starting voice channel:', error);
+      setIsVoiceChannelActive(false);
+      setVoiceChannelStatus('Failed to start');
+      setStatus(prev => ({
+        ...prev,
+        voiceChannel: { active: false, status: 'idle' }
+      }));
+    }
+  }, [playAudio, startVoiceInput, isVoiceChannelActive]);
+
+  const stopVoiceChannel = useCallback(async () => {
+    try {
+      setIsVoiceChannelActive(false);
+      setVoiceChannelStatus('Disconnecting...');
+      
+      // Stop current recording if any
+      if (isRecording) {
+        await stopVoiceInput();
+      }
+
+      // Reset voice channel state
+      setStatus(prev => ({
+        ...prev,
+        voiceChannel: { active: false, status: 'idle' }
+      }));
+      setVoiceChannelStatus('Ready');
+
+      // Clear audio queue and reset state
+      audioQueueManager.clear();
+      setAudioState(prev => ({
+        ...prev,
+        isPlaying: false,
+        isStreaming: false,
+        streamProgress: 0,
+        queueSize: 0
+      }));
+
+    } catch (error) {
+      console.error('Error stopping voice channel:', error);
+      setVoiceChannelStatus('Error disconnecting');
+    }
+  }, [isRecording, stopVoiceInput]);
+
   const value: ChatContextType = {
     messages,
     status,
     audioState,
     isRecording,
     isMinimized,
+    isVoiceChannelActive,
+    voiceChannelStatus,
     sendMessage,
     startVoiceInput,
     stopVoiceInput,
     cancelVoiceInput,
+    startVoiceChannel,
+    stopVoiceChannel,
     playAudio,
     pauseAudio,
     minimizeChat,
